@@ -1,0 +1,196 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+    <title>Project Horus Pre-Flight Check</title>
+
+    <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/tabulator_simple.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
+
+
+    <script src="{{ url_for('static', filename='js/jquery-3.3.1.min.js')}}"></script>
+    <script src="{{ url_for('static', filename='js/jquery-ui.min.js')}}"></script>
+    <script src="{{ url_for('static', filename='js/socket.io-1.4.5.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/tabulator.min.js') }}"></script>
+    <script type="text/javascript" charset="utf-8">
+
+
+        $(document).ready(function() {
+            // Use the 'update_status' namespace for all of our traffic
+            namespace = '/update_status';
+
+            // Connect to the Socket.IO server.
+            // The connection URL has the following format:
+            //     http[s]://<domain>:<port>[/<namespace>]
+            var socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port + namespace);
+
+
+            // Event handler for Log data.
+            socket.on('log_event', function(msg) {
+
+                $('#log_data').append('<br>' + $('<div/>').text(msg.timestamp + ": " + msg.msg).html());
+                // Scroll to the bottom of the log table
+                $("#log_data").scrollTop($("#log_data")[0].scrollHeight);
+            });
+
+            socket.on('wenet_event', function(msg) {
+                $('#wenet_data').append('<br>' + $('<div/>').text(msg.timestamp + ": " + msg.msg).html());
+                // Scroll to the bottom of the log table
+                $("#wenet_data").scrollTop($("#wenet_data")[0].scrollHeight);
+            });
+
+            socket.on('wenet_gps', function(msg) {
+                $('#wenet_gps').html(msg.data);
+            });   
+
+            // Task Update event handler.
+            socket.on('task_event', function(msg){
+                // Grab the latest task list.
+                $.getJSON("/get_task_list", function(data){
+                    var task_info = "";
+                    for (_task in data){
+                        task_info += "SDR #" + _task + ": " + data[_task] + "    ";
+                    }
+
+                    $('#task_status').html("<h2>Current Task: <small>"+task_info+"</small></h2>");
+                });
+            });
+            
+            // Telemetry Data Table
+            // Using tabulator makes this *really* easy.
+            $("#ozimux_table").tabulator({
+                height:180,
+                layout:"fitData", 
+                layoutColumnsOnNewData:true,
+                columns:[ //Define Table Columns
+                    {title:"Source", field:"source", headerSort:false},
+                    {title:"Timestamp", field:"timestamp", headerSort:false},
+                    {title:"Latitude", field:"latitude", headerSort:false},
+                    {title:"Longitude", field:"longitude", headerSort:false},
+                    {title:"Altitude (m)", field:"altitude", headerSort:false}
+                ]
+            });
+
+            // LoRa Event Handler
+            // We will get one of these with every new LoRa update
+            socket.on('ozimux_event', function(msg) {
+
+
+                // Process payload data.
+                var ozimux_payloads = [];
+
+                if (jQuery.isEmptyObject(msg)){
+                    lora_payloads = [{source:'None'}];
+                }else{
+                    for (src_name in msg){
+                        var ozi_data = Object.assign({},msg[src_name]);
+
+                        // Modify some fields.
+                        ozi_data.latitude = ozi_data.latitude.toFixed(5);
+                        ozi_data.longitude = ozi_data.longitude.toFixed(5);
+                        ozi_data.altitude = ozi_data.altitude.toFixed(1);
+
+                        ozimux_payloads.push(ozi_data);
+                    }
+
+                }
+
+                $("#ozimux_table").tabulator("setData", ozimux_payloads);
+
+            });  
+
+
+            $("#lora_table").tabulator({
+                height:100,
+                layout:"fitData", 
+                layoutColumnsOnNewData:true,
+                columns:[ //Define Table Columns
+                    {title:"ID", field:"payload_id", headerSort:false},
+                    {title:"Time", field:"time", headerSort:false},
+                    {title:"Latitude", field:"latitude", headerSort:false},
+                    {title:"Longitude", field:"longitude", headerSort:false},
+                    {title:"Altitude (m)", field:"altitude", headerSort:false},
+                    {title:"Sats", field:"sats", headerSort:false},
+                    {title:"Batt (V)", field:"batt_voltage", headerSort:false},
+                    {title:"Pyro (V)", field:"pyro_voltage", headerSort:false},
+                    {title:"RSSI", field:"RSSI", headerSort:false},
+                ]
+            });
+
+            // LoRa Event Handler
+            // We will get one of these with every new LoRa update
+            socket.on('lora_event', function(msg) {
+                // Read out and Update the Frequency and RSSI Fields.
+                var lora_rx_status = "<b>Frequency (MHz):</b> " + msg.frequency.toFixed(3) + " <b>RSSI (dB):</b> " + msg.rssi
+                $("#lora_rx_status").html(lora_rx_status);
+
+                // Process payload data.
+                var lora_payloads = [];
+
+                if (jQuery.isEmptyObject(msg.payloads)){
+                    lora_payloads = [{payload_id:'None'}];
+                }else{
+                    for (lora_id in msg.payloads){
+                        var lora_id_data = Object.assign({},msg.payloads[lora_id]);
+
+                        // Modify some fields.
+                        lora_id_data.latitude = lora_id_data.latitude.toFixed(5);
+                        lora_id_data.longitude = lora_id_data.longitude.toFixed(5);
+                        lora_id_data.altitude = lora_id_data.altitude.toFixed(1);
+                        lora_id_data.batt_voltage = lora_id_data.batt_voltage.toFixed(2);
+                        lora_id_data.pyro_voltage = lora_id_data.pyro_voltage.toFixed(2);
+
+                        lora_payloads.push(lora_id_data);
+                    }
+                }
+
+                $("#lora_table").tabulator("setData", lora_payloads);
+
+            });         
+
+
+            // Tell the server we are connected and ready for data.
+            socket.on('connect', function() {
+                socket.emit('client_connected', {data: 'I\'m connected!'});
+                // This will cause the server to emit a few messages telling us to fetch data.
+            });
+
+        });
+    </script>
+</head>
+<body>
+    <div id="autorx_header"><h2>Pre-Flight Check</h2></div>
+    <div class="container-fluid">
+        <div class="row">
+            <div class='col-12'>
+                <div id="task_status"><h3>OziMux Data:</h3></div>
+            </div>
+        </div>
+        <div class="row">
+            <div class='col-12' id="ozimux_table"></div>
+        </div>
+        <div class="row">
+            <div class='col-12'>
+                <div id="cutdown_header"><h3>LoRa Payloads</h3></div>
+                <div id="lora_rx_status">No LoRa Data Yet...</div>
+            </div>
+        </div>
+        <div class="row">
+            <div class='col-12' id="lora_table"></div>
+        </div>
+        <div class="row">
+            <div class='col-12'>
+                <h2>Wenet Messages:</h2>
+                <div id="wenet_gps"></div><br>
+                <div id="wenet_data" style="height:150px;overflow:scroll"></div>
+            </div>
+        </div>
+        <div class="row">
+            <div class='col-12'>
+                <h2>UDP Broadcast Log:</h2>
+                <div id="log_data" style="height:400px;overflow:scroll"></div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
