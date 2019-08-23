@@ -98,7 +98,50 @@
                 $("#ozimux_table").tabulator("setData", ozimux_payloads);
 
             });  
+            // Telemetry Data Table
+            // Using tabulator makes this *really* easy.
+            $("#payload_summary_table").tabulator({
+                height:180,
+                layout:"fitData", 
+                layoutColumnsOnNewData:true,
+                columns:[ //Define Table Columns
+                    {title:"Callsign", field:"callsign", headerSort:false},
+                    {title:"Timestamp", field:"timestamp", headerSort:false},
+                    {title:"Latitude", field:"latitude", headerSort:false},
+                    {title:"Longitude", field:"longitude", headerSort:false},
+                    {title:"Altitude (m)", field:"altitude", headerSort:false},
+                    {title:"SNR (dB)", field:"snr", headerSort:false}
+                ]
+            });
 
+            // LoRa Event Handler
+            // We will get one of these with every new LoRa update
+            socket.on('payload_summary_event', function(msg) {
+
+
+                // Process payload data.
+                var payload_summary_payloads = [];
+
+                if (jQuery.isEmptyObject(msg)){
+                    payload_summary_payloads = [{callsign:'None'}];
+                }else{
+                    for (src_name in msg){
+                        var summary_data = Object.assign({},msg[src_name]);
+
+                        // Modify some fields.
+                        summary_data.latitude = summary_data.latitude.toFixed(5);
+                        summary_data.longitude = summary_data.longitude.toFixed(5);
+                        summary_data.altitude = summary_data.altitude.toFixed(1);
+                        summary_data.snr = summary_data.snr.toFixed(1);
+
+                        payload_summary_payloads.push(summary_data);
+                    }
+
+                }
+
+                $("#payload_summary_table").tabulator("setData", payload_summary_payloads);
+
+            });  
 
             $("#lora_table").tabulator({
                 height:100,
@@ -155,6 +198,19 @@
                 // This will cause the server to emit a few messages telling us to fetch data.
             });
 
+
+            window.setInterval(function(){
+                $.ajax({
+                        url: "/server_time",
+                        dataType: 'json',
+                        async: true,
+                        success: function(data) {
+                            $('#server_time').html(data.time);
+                        }
+                });
+            },1000); 
+
+
         });
     </script>
 </head>
@@ -162,12 +218,25 @@
     <div id="autorx_header"><h2>Pre-Flight Check</h2></div>
     <div class="container-fluid">
         <div class="row">
+                <div class='col-12'>
+                    <div id="server_time"></div>
+                </div>
+            </div>
+        <div class="row">
             <div class='col-12'>
                 <div id="task_status"><h3>OziMux Data:</h3></div>
             </div>
         </div>
         <div class="row">
             <div class='col-12' id="ozimux_table"></div>
+        </div>
+        <div class="row">
+            <div class='col-12'>
+                <div id="task_status"><h3>Horus UDP Data:</h3></div>
+            </div>
+        </div>
+        <div class="row">
+            <div class='col-12' id="payload_summary_table"></div>
         </div>
         <div class="row">
             <div class='col-12'>

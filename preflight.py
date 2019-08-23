@@ -9,7 +9,7 @@ import json
 import flask
 from flask_socketio import SocketIO
 import time
-import datetime
+from datetime import datetime
 from horuslib import *
 from horuslib.wenet import *
 from horuslib.listener import *
@@ -41,6 +41,19 @@ socketio = SocketIO(app)
 current_ozimux = {}
 
 
+
+# Incoming Payload summary data.
+# One dictionary element will be produced per source name, and will be updated with data, and data age.
+# Each entry will contain:
+#   'callsign'
+#   'lat'
+#   'lon'
+#   'alt'
+#   'age'
+#   'timestamp'
+current_payload_summary = {}
+
+
 # LoRa Data
 current_lora = {
     'frequency': 0.0,
@@ -60,6 +73,11 @@ LAST_PACKETS_DISCARD = ['LOWPRIORITY', 'WENET', 'OZIMUX']
 def flask_index():
     """ Render main index page """
     return flask.render_template('index.html')
+
+@app.route("/server_time")
+def get_server_time():
+    """ Return server time """
+    return json.dumps({'time':datetime.utcnow().isoformat()})
 
 
 @app.route("/current_lora")
@@ -157,6 +175,36 @@ def handle_packets(packet):
         # Indicate to the web client there is new data.
         flask_emit_event('ozimux_event',current_ozimux)
 
+    elif packet['type'] == 'PAYLOAD_SUMMARY':
+        _callsign = packet['callsign']
+
+        if _callsign not in current_payload_summary:
+            current_payload_summary[_callsign] = {'snr': 0.0}
+
+        current_payload_summary[_callsign]['callsign'] = _callsign
+        current_payload_summary[_callsign]['latitude'] = packet['latitude']
+        current_payload_summary[_callsign]['longitude'] = packet['longitude']
+        current_payload_summary[_callsign]['altitude'] = packet['altitude']
+        current_payload_summary[_callsign]['timestamp'] = datetime.now().strftime("%H:%M:%S")
+
+        if 'snr' in packet:
+            if packet['snr'] > -255.0:
+                current_payload_summary[_callsign]['snr'] = packet['snr']
+
+        # Indicate to the web client there is new data.
+        flask_emit_event('payload_summary_event',current_payload_summary)
+
+    elif packet['type'] == 'MODEM_STATS':
+        _callsign = packet['source']
+
+        if _callsign not in current_payload_summary:
+            current_payload_summary[_callsign] = {'callsign': _callsign, 'latitude':-999.0, 'longitude': -999.0, 'altitude': 0.0, 'timestamp': datetime.now().strftime("%H:%M:%S")}
+        
+        current_payload_summary[_callsign]['snr'] = packet['snr']
+
+        flask_emit_event('payload_summary_event',current_payload_summary)
+
+
     pass
 
 
@@ -164,7 +212,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-p","--port",default=5001,help="Port to run Web Server on.")
+    parser.add_argument("-p","--port",default=5004,help="Port to run Web Server on.")
     args = parser.parse_args()
 
     horus_udp_rx = UDPListener(callback=handle_packets)
