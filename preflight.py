@@ -212,7 +212,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("-p","--port",default=5004,help="Port to run Web Server on.")
+    parser.add_argument("-p","--port",default=5004, type=int, help="Port to run Web Server on.")
     args = parser.parse_args()
 
     horus_udp_rx = UDPListener(callback=handle_packets)
